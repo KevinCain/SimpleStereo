@@ -13,6 +13,9 @@ import numpy as np
 import cv2
 from scipy.ndimage import map_coordinates
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
 import simplestereo as ss
 
 
@@ -80,7 +83,7 @@ def chessboardSingle(images, chessboardSize = DEFAULT_CHESSBOARD_SIZE, squareSiz
     
     
         
-def chessboardStereo(images, chessboardSize = DEFAULT_CHESSBOARD_SIZE, squareSize=1):
+def chessboardStereo(images, chessboardSize=DEFAULT_CHESSBOARD_SIZE, squareSize=1, fisheye1=False, fisheye2=False):
     """
     Performs stereo calibration between two cameras and returns a StereoRig object.
     
@@ -98,6 +101,9 @@ def chessboardStereo(images, chessboardSize = DEFAULT_CHESSBOARD_SIZE, squareSiz
     squareSize : float
         Length of the square side in the chosen world units. For example, if the square size is set in mm, 
         measures in the 3D reconstruction will be in mm. Default to 1.
+    fisheye1, fisheye2 : bool
+        Set to true if one or both of the stereo cameras have fisheye lenses
+        For fisheye cameras, the number of distortion coefficients is 4 instead of 5.
         
     Returns
     ----------
@@ -140,23 +146,48 @@ def chessboardStereo(images, chessboardSize = DEFAULT_CHESSBOARD_SIZE, squareSiz
             imagePoints2.append(corners2)
             counter += 1
     
+    # Flags for calibration
+    flags = 0
+
+    logging.info(f"Calibration flags set to: {flags}")
+
     # Initialize parameters
-    R = np.eye(3, dtype=np.float64)             # Rotation matrix between the 1st and the 2nd camera coordinate systems.
-    T = np.zeros((3, 1), dtype=np.float64)      # Translation vector between the coordinate systems of the cameras.
+    R = np.eye(3, dtype=np.float64)
+    T = np.zeros((3, 1), dtype=np.float64)
     cameraMatrix1 = np.eye(3, dtype=np.float64)
     cameraMatrix2 = np.eye(3, dtype=np.float64)
-    distCoeffs1 = np.empty(5)
-    distCoeffs2 = np.empty(5)
+    distCoeffs1 = np.empty(4 if fisheye1 else 5)  # For fisheye, you need 4 distortion coefficients
+    distCoeffs2 = np.empty(4 if fisheye2 else 5)
     
-    # Flags for calibration
-    # TO DO flags management to provide different configurations to user
-    flags = 0
+    # Calibrate each camera if they are fisheye
+    if fisheye1:
+        logging.info("Calibrating first camera as fisheye.")
+        ret1, cameraMatrix1, distCoeffs1, rvecs1, tvecs1 = cv2.fisheye.calibrate(
+            np.array([[objp]] * counter), imagePoints1, img1.shape[::-1],
+            cameraMatrix1, distCoeffs1, flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
+    if fisheye2:
+        logging.info("Calibrating second camera as fisheye.")
+        ret2, cameraMatrix2, distCoeffs2, rvecs2, tvecs2 = cv2.fisheye.calibrate(
+            np.array([[objp]] * counter), imagePoints2, img2.shape[::-1],
+            cameraMatrix2, distCoeffs2, flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
     
-    # Do stereo calibration
-    retval, intrinsic1, distCoeffs1, intrinsic2, distCoeffs2, R, T, E, F = cv2.stereoCalibrate( np.array([[objp]] * counter), imagePoints1, imagePoints2, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, imageSize = img1.shape[::-1], flags=flags, criteria = DEFAULT_TERMINATION_CRITERIA)
+    if fisheye1 and fisheye2:
+        logging.info("Performing stereo calibration for fisheye cameras.")
+        retval, _, _, _, _, R, T, _, _ = cv2.fisheye.stereoCalibrate(
+            np.array([[objp]] * counter), imagePoints1, imagePoints2, 
+            cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, img1.shape[::-1],
+            flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
+    else:
+        # Regular stereo calibration if any one or none of them is fisheye
+        logging.info("Performing regular stereo calibration.")
+        retval, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
+            np.array([[objp]] * counter), imagePoints1, imagePoints2, 
+            cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, img1.shape[::-1],
+            flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
     
     # Build StereoRig object
-    stereoRigObj = ss.StereoRig(img1.shape[::-1][:2], img2.shape[::-1][:2], intrinsic1, intrinsic2, distCoeffs1, distCoeffs2, R, T, F = F, E = E, reprojectionError = retval)
+    stereoRigObj = ss.StereoRig(img1.shape[::-1][:2], img2.shape[::-1][:2], cameraMatrix1, cameraMatrix2,
+                                distCoeffs1, distCoeffs2, R, T, F=F, E=E, reprojectionError=retval)
     
     return stereoRigObj
 
