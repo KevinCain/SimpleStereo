@@ -159,38 +159,51 @@ def chessboardStereo(images, chessboardSize=DEFAULT_CHESSBOARD_SIZE, squareSize=
     distCoeffs1 = np.empty(4 if fisheye1 else 5)  # For fisheye, you need 4 distortion coefficients
     distCoeffs2 = np.empty(4 if fisheye2 else 5)
     
-    # Calibrate each camera if they are fisheye
+    # Individual calibration for fisheye and non-fisheye cameras
     if fisheye1:
-        logging.info("Calibrating first camera as fisheye.")
+        # Fisheye calibration for the first camera
         ret1, cameraMatrix1, distCoeffs1, rvecs1, tvecs1 = cv2.fisheye.calibrate(
             np.array([[objp]] * counter), imagePoints1, img1.shape[::-1],
             cameraMatrix1, distCoeffs1, flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
+    else:
+        # Regular calibration for the first camera
+        ret1, cameraMatrix1, distCoeffs1, rvecs1, tvecs1 = cv2.calibrateCamera(
+            np.array([[objp]] * counter), imagePoints1, img1.shape[::-1],
+            cameraMatrix1, distCoeffs1, flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
+        
     if fisheye2:
-        logging.info("Calibrating second camera as fisheye.")
+        # Fisheye calibration for the second camera
         ret2, cameraMatrix2, distCoeffs2, rvecs2, tvecs2 = cv2.fisheye.calibrate(
             np.array([[objp]] * counter), imagePoints2, img2.shape[::-1],
             cameraMatrix2, distCoeffs2, flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
+    else:
+        # Regular calibration for the second camera
+        ret2, cameraMatrix2, distCoeffs2, rvecs2, tvecs2 = cv2.calibrateCamera(
+            np.array([[objp]] * counter), imagePoints2, img2.shape[::-1],
+            cameraMatrix2, distCoeffs2, flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
     
+    # Stereo Calibration
     if fisheye1 and fisheye2:
-        logging.info("Performing stereo calibration for fisheye cameras.")
+        # Fisheye stereo calibration
         retval, _, _, _, _, R, T, _, _ = cv2.fisheye.stereoCalibrate(
             np.array([[objp]] * counter), imagePoints1, imagePoints2, 
             cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, img1.shape[::-1],
             flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
     else:
-        # Regular stereo calibration if any one or none of them is fisheye
-        logging.info("Performing regular stereo calibration.")
+        # Regular stereo calibration
         retval, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
             np.array([[objp]] * counter), imagePoints1, imagePoints2, 
             cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, img1.shape[::-1],
             flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
     
-    # Build StereoRig object
-    stereoRigObj = ss.StereoRig(img1.shape[::-1][:2], img2.shape[::-1][:2], cameraMatrix1, cameraMatrix2,
-                                distCoeffs1, distCoeffs2, R, T, F=F, E=E, reprojectionError=retval)
+    # Create and return the StereoRig object (replace 'ss' with your actual import)
+    stereoRigObj = ss.StereoRig(
+        img1.shape[::-1][:2], img2.shape[::-1][:2], 
+        cameraMatrix1, cameraMatrix2, distCoeffs1, distCoeffs2, 
+        R, T, F=None if fisheye1 or fisheye2 else F, E=None if fisheye1 or fisheye2 else E, 
+        reprojectionError=retval)
     
     return stereoRigObj
-
 
 def chessboardProCam(images, projectorResolution, chessboardSize = DEFAULT_CHESSBOARD_SIZE, squareSize=1, 
                      black_thr=40, white_thr=5, camIntrinsic=None, camDistCoeffs=None):
