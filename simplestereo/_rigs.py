@@ -6,7 +6,7 @@ Main classes loaded at package level.
 
 See :py:module:`__init__.py`.
 
-
+mapx1.yml
 .. todo::
     - Add new rig class for uncalibrated stereo.
 """
@@ -14,6 +14,7 @@ See :py:module:`__init__.py`.
 import json
 import numpy as np
 import cv2
+import os
 
 from . import rectification
 from . import utils
@@ -52,7 +53,7 @@ class StereoRig:
         (see :func:`simplestereo.utils.moveExtrinsicOriginToFirstCamera`).
     
     """  
-    def __init__(self, res1, res2, intrinsic1, intrinsic2, distCoeffs1, distCoeffs2, R, T, F=None, E=None, reprojectionError=None, fisheye1=False, fisheye2=False):
+    def __init__(self, res1, res2, intrinsic1, intrinsic2, distCoeffs1, distCoeffs2, R, T, F=None, E=None, reprojectionError=None):
         self.res1 = res1
         self.res2 = res2
         self.intrinsic1 = intrinsic1
@@ -64,8 +65,6 @@ class StereoRig:
         self.F = F
         self.E = E
         self.reprojectionError = reprojectionError
-        self.fisheye1 = fisheye1
-        self.fisheye2 = fisheye2
 
     @property
     def intrinsic1(self):
@@ -160,10 +159,8 @@ class StereoRig:
         F = data.get('F')
         E = data.get('E')
         reprojectionError = data.get('reprojectionError')
-        fisheye1 = data.get('fisheye1', False)
-        fisheye2 = data.get('fisheye2', False)
         
-        return cls(res1, res2, intrinsic1, intrinsic2, distCoeffs1, distCoeffs2, R, T, F, E, reprojectionError, fisheye1, fisheye2)
+        return cls(res1, res2, intrinsic1, intrinsic2, distCoeffs1, distCoeffs2, R, T, F, E, reprojectionError)
     
     def save(self, filepath):
         """
@@ -192,8 +189,6 @@ class StereoRig:
                 out['E'] = self.E.tolist()
             if self.reprojectionError:
                 out['reprojectionError'] = self.reprojectionError
-            out['fisheye1'] = self.fisheye1
-            out['fisheye2'] = self.fisheye2
             json.dump(out, f, indent=4)
             
     def getCenters(self):
@@ -291,14 +286,14 @@ class StereoRig:
     def undistortImages(self, img1, img2, changeCameras=False, alpha=1, destDims=None, centerPrincipalPoint=False):
         """
         Undistort two given images of the stereo rig.
-
+        
         This method wraps `cv2.getOptimalNewCameraMatrix()` followed
         by `cv2.undistort()` for both images.
         If changeCameras is False, original camera matrices are used,
         otherwise all the parameters of
         `cv2.getOptimalNewCameraMatrix()` are considered when 
         undistorting the images.
-
+        
         Parameters
         ----------
         img1, img2 : cv2.Mat
@@ -315,48 +310,33 @@ class StereoRig:
             Resolution of destination images as (width, height) tuple (default to first image resolution).
         centerPrincipalPoint : bool
             If True the principal point is centered within the images (default to False).
-
+            
         Returns
         -------
         img1_undist, img2_undist : cv2.Mat
             The undistorted images.
         cameraMatrixNew1, cameraMatrixNew2 : numpy.ndarray
             If *changeCameras* is set to True, the new camera matrices are returned too.
-
+        
         See Also
         --------
         cv2.getOptimalNewCameraMatrix
         cv2.undistort
         """
-        if self.fisheye1 or self.fisheye2:
-            if self.fisheye1:
-                map1, map2 = cv2.fisheye.initUndistortRectifyMap(self.intrinsic1, self.distCoeffs1, np.eye(3), self.intrinsic1, self.res1, cv2.CV_16SC2)
-                img1_undist = cv2.remap(img1, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-            else:
-                img1_undist = cv2.undistort(img1, self.intrinsic1, self.distCoeffs1)
-
-            if self.fisheye2:
-                map1, map2 = cv2.fisheye.initUndistortRectifyMap(self.intrinsic2, self.distCoeffs2, np.eye(3), self.intrinsic2, self.res2, cv2.CV_16SC2)
-                img2_undist = cv2.remap(img2, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-            else:
-                img2_undist = cv2.undistort(img2, self.intrinsic2, self.distCoeffs2)
-
+        if changeCameras:   # Change camera matrices
+            cameraMatrixNew1, _ = cv2.getOptimalNewCameraMatrix(self.intrinsic1, self.distCoeffs1, self.res1, alpha, destDims, centerPrincipalPoint)
+            cameraMatrixNew2, _ = cv2.getOptimalNewCameraMatrix(self.intrinsic2, self.distCoeffs2, self.res2, alpha, destDims, centerPrincipalPoint)
+            
+            img1_undist = cv2.undistort(img1, self.intrinsic1, self.distCoeffs1, None, cameraMatrixNew1)
+            img2_undist = cv2.undistort(img2, self.intrinsic2, self.distCoeffs2, None, cameraMatrixNew2)
+            
+            return img1_undist, img2_undist, cameraMatrixNew1, cameraMatrixNew2
+        
+        else:   # Use original camera matrices
+            img1_undist = cv2.undistort(img1, self.intrinsic1, self.distCoeffs1, None, None)
+            img2_undist = cv2.undistort(img2, self.intrinsic2, self.distCoeffs2, None, None)
+            
             return img1_undist, img2_undist
-        else:
-            if changeCameras:   # Change camera matrices
-                cameraMatrixNew1, _ = cv2.getOptimalNewCameraMatrix(self.intrinsic1, self.distCoeffs1, self.res1, alpha, destDims, centerPrincipalPoint)
-                cameraMatrixNew2, _ = cv2.getOptimalNewCameraMatrix(self.intrinsic2, self.distCoeffs2, self.res2, alpha, destDims, centerPrincipalPoint)
-
-                img1_undist = cv2.undistort(img1, self.intrinsic1, self.distCoeffs1, None, cameraMatrixNew1)
-                img2_undist = cv2.undistort(img2, self.intrinsic2, self.distCoeffs2, None, cameraMatrixNew2)
-
-                return img1_undist, img2_undist, cameraMatrixNew1, cameraMatrixNew2
-
-            else:   # Use original camera matrices
-                img1_undist = cv2.undistort(img1, self.intrinsic1, self.distCoeffs1, None, None)
-                img2_undist = cv2.undistort(img2, self.intrinsic2, self.distCoeffs2, None, None)
-
-                return img1_undist, img2_undist
           
         
 class RectifiedStereoRig(StereoRig):
@@ -560,6 +540,20 @@ class RectifiedStereoRig(StereoRig):
         # Recompute final maps considering fitting transformations too
         self.mapx1, self.mapy1 = cv2.initUndistortRectifyMap(self.intrinsic1, self.distCoeffs1, R1, self.K1, destDims, cv2.CV_32FC1)
         self.mapx2, self.mapy2 = cv2.initUndistortRectifyMap(self.intrinsic2, self.distCoeffs2, R2, self.K2, destDims, cv2.CV_32FC1)
+
+        # Save maps to disk
+        # Save the rectification maps to disk
+        save_path='C:\\temp'
+        # Ensure the save path directory exists
+        os.makedirs(save_path, exist_ok=True)
+
+        # Save the rectification maps to disk
+        cv2.FileStorage(os.path.join(save_path, 'mapx1.yml'), cv2.FILE_STORAGE_WRITE).write('mapx1', self.mapx1)
+        cv2.FileStorage(os.path.join(save_path, 'mapy1.yml'), cv2.FILE_STORAGE_WRITE).write('mapy1', self.mapy1)
+        cv2.FileStorage(os.path.join(save_path, 'mapx2.yml'), cv2.FILE_STORAGE_WRITE).write('mapx2', self.mapx2)
+        cv2.FileStorage(os.path.join(save_path, 'mapy2.yml'), cv2.FILE_STORAGE_WRITE).write('mapy2', self.mapy2)
+
+        print(f'Rectification maps saved to {save_path}')
         
     def rectifyImages(self, img1, img2, interpolation=cv2.INTER_LINEAR):
         """
