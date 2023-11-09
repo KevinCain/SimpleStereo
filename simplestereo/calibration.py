@@ -87,6 +87,164 @@ def chessboardSingle(images, chessboardSize = DEFAULT_CHESSBOARD_SIZE, squareSiz
     return cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None, flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
     
 
+# Function to calculate rotation and translation vectors for each image via PnP
+def calculate_vectors(objpoints, imgpoints, cameraMatrix, distCoeffs):
+    rvecs, tvecs = [], []
+    for i in range(len(imgpoints)):
+        success, rvec, tvec = cv2.solvePnP(objpoints[i], imgpoints[i], cameraMatrix, distCoeffs)
+        if success:
+            rvecs.append(rvec)
+            tvecs.append(tvec)
+        else:
+            raise ValueError(f"SolvePnP failed to find a solution for the {i}-th image.")
+    return rvecs, tvecs
+
+def chessboardHybridStereo(images, chessboardSize=DEFAULT_CHESSBOARD_SIZE, squareSize=1, 
+                     distortionCoeffsNumber=5):
+    """
+    Performs stereo calibration between two cameras with separate distortion coefficients for each camera.
+    
+    Parameters
+    ----------
+    images : list or tuple
+        A list (or tuple) of 2 dimensional tuples (ordered left and right) of image paths.
+    chessboardSize: tuple
+        Chessboard internal dimensions as (width, height).
+    squareSize : float
+        The size of a square in your defined world units.
+    distortionCoeffsNumber: int
+        The number of distortion coefficients for both cameras.
+    
+    Returns
+    -------
+    StereoRig
+        A calibrated stereo rig object.
+    """
+
+    # Load pre-calibrated camera data: (21) left and right photos see the chessboard
+    with np.load('calibration_data_left_21.npz') as X:
+        cameraMatrix1_21, distCoeffs1_21 = X['mtxL'], X['distL']
+        rvecsL_21, tvecsL_21 = X['rvecsL'], X['tvecsL']
+    
+    # Right camera matrix is already 'perfect' after distortion correction
+    # We load distion coefficients here but reset to zero below
+    with np.load('calibration_data_right_21.npz') as X:
+        cameraMatrix2_21, distCoeffs2_21 = X['mtxR'], X['distR']
+        rvecsR_21, tvecsR_21 = X['rvecsR'], X['tvecsR']
+
+    # Load pre-calibrated distortion coefficients from 140 images for the left camera ONLY
+    with np.load('calibration_data_left_140.npz') as X:
+        distCoeffs1_140 = X['distL']  # Better estimation of distortion coefficients
+
+    print("Distortion Coefficients Left Camera 21 Images:", distCoeffs1_21)
+    print("Distortion Coefficients Left Camera 140 Images:", distCoeffs1_140)
+    print("Distortion Coefficients Right Camera 21 Images:", distCoeffs2_21)
+
+    # Initialize the right camera distortion coefficients to zero
+    #distCoeffs2 = np.zeros((distortionCoeffsNumber,1))
+
+    # Arrays to store object points and image points from all the images.
+    objp = np.zeros((chessboardSize[0]*chessboardSize[1], 3), np.float32)
+    objp[:, :2] = np.mgrid[0:chessboardSize[0], 0:chessboardSize[1]].T.reshape(-1, 2) * squareSize
+
+    # Image points for the left & right cameras
+    imagePoints1, imagePoints2 = [], []
+
+    # Process each pair of images
+    for idx, (path1, path2) in enumerate(images):
+        img1 = cv2.imread(path1, cv2.IMREAD_GRAYSCALE)
+        img2 = cv2.imread(path2, cv2.IMREAD_GRAYSCALE)
+
+        if img1 is None or img2 is None:
+            raise ValueError(f"One of the images in {path1}, {path2} not found!")
+
+        # Find the chessboard corners in the original distorted image
+        ret1, corners1 = cv2.findChessboardCorners(img1, chessboardSize)
+        ret2, corners2 = cv2.findChessboardCorners(img2, chessboardSize)
+
+        # If found, refine the corner positions
+        if ret1:
+            corners1 = cv2.cornerSubPix(img1, corners1, DEFAULT_CORNERSUBPIX_WINSIZE, (-1,-1), DEFAULT_TERMINATION_CRITERIA)
+            imagePoints1.append(corners1)
+        
+        if ret2:
+            corners2 = cv2.cornerSubPix(img2, corners2, DEFAULT_CORNERSUBPIX_WINSIZE, (-1,-1), DEFAULT_TERMINATION_CRITERIA)
+            imagePoints2.append(corners2)
+
+        '''
+        # Undistort images using the pre-loaded camera parameters
+        undistorted_img1 = cv2.undistort(img1, cameraMatrix1_21, distCoeffs1_21)
+        undistorted_img2 = cv2.undistort(img2, cameraMatrix2_21, distCoeffs2_21)
+
+        # Generate object points
+        objP = np.zeros((chessboardSize[0]*chessboardSize[1], 3), np.float32)
+        objP[:, :2] = np.mgrid[0:chessboardSize[0], 0:chessboardSize[1]].T.reshape(-1, 2) * squareSize
+
+        # Reproject object points to image points
+        imgpoints1, _ = cv2.projectPoints(objP, rvecsL_21[idx], tvecsL_21[idx], cameraMatrix1_21, distCoeffs1_21)
+        imgpoints2, _ = cv2.projectPoints(objP, rvecsR_21[idx], tvecsR_21[idx], cameraMatrix2_21, distCoeffs2_21)
+
+        # Draw the reprojected points on the undistorted images
+        undistorted_img1 = cv2.drawChessboardCorners(undistorted_img1, chessboardSize, imgpoints1, True)
+        undistorted_img2 = cv2.drawChessboardCorners(undistorted_img2, chessboardSize, imgpoints2, True)
+
+        # Display the images
+        cv2.imshow('Reprojected Points Left', undistorted_img1)
+        #cv2.imshow('Reprojected Points Right', undistorted_img2)
+        if cv2.waitKey(0) & 0xFF == ord('q'):
+            break
+        '''
+
+    # Replicate objp for all images where corners were found
+    objpoints = [objp for _ in imagePoints1]
+
+    # Use PnP to reproject points and visualize on the undistorted images
+    # Calculate rotation and translation vectors
+    rvecsL, tvecsL = calculate_vectors(objpoints, imagePoints1, cameraMatrix1_21, distCoeffs1_140)
+    rvecsR, tvecsR = calculate_vectors(objpoints, imagePoints2, cameraMatrix2_21, distCoeffs2_21)
+    print("rvecsL:", rvecsL)
+    print("tvecsL:", tvecsL)
+
+    '''
+    for i, corners in enumerate(imagePoints1):
+        # Read an original left image
+        img = cv2.imread(images[i][0], cv2.IMREAD_GRAYSCALE)
+        # Undistort the image
+        undistorted_img = cv2.undistort(img, cameraMatrix1_21, distCoeffs1_140)
+        # Reproject the object points onto the undistorted image plane
+        reprojected_imgpoints, _ = cv2.projectPoints(objp, rvecsL[i], tvecsL[i], cameraMatrix1_21, distCoeffs1_140)
+        # Draw the reprojected points onto the undistorted image
+        undistorted_img = cv2.drawChessboardCorners(undistorted_img, chessboardSize, reprojected_imgpoints.reshape(-1, 2), True)
+        # Show the undistorted image with reprojected points
+        cv2.imshow('Reprojected Points on Undistorted Image', undistorted_img)
+        if cv2.waitKey(0) == 27:  # Exit if 'ESC' is pressed
+            break
+    cv2.destroyAllWindows()
+    '''
+
+    # Perform stereo calibration with locked intrinsics
+    # Load one image to get the shape for stereoCalibrate
+    sample_img = cv2.imread(images[0][0], cv2.IMREAD_GRAYSCALE)
+    if sample_img is None:
+        raise IOError(f"Couldn't load the image {images[0][0]}")
+
+    flags = cv2.CALIB_FIX_INTRINSIC
+    #flags = cv2.CALIB_USE_INTRINSIC_GUESS
+
+    # We pass our best estimate of camera matrices to stereo calibration
+    retval, cameraMatrix1_21, distCoeffs1_140, cameraMatrix2_21, _, R, T, E, F = cv2.stereoCalibrate(
+        objpoints, imagePoints1, imagePoints2,
+        cameraMatrix1_21, distCoeffs1_140, cameraMatrix2_21, np.zeros((distortionCoeffsNumber, 1)),
+        sample_img.shape[::-1], flags=flags, criteria=DEFAULT_TERMINATION_CRITERIA)
+
+    # Create and return a StereoRig object
+    # Note we zero the right coefficients
+    stereoRigObj = ss.StereoRig(sample_img.shape[::-1][:2], img2.shape[::-1][:2],
+        cameraMatrix1_21, cameraMatrix2_21, distCoeffs1_140, np.zeros((distortionCoeffsNumber, 1)),
+        R, T, F=F, E=E, reprojectionError=retval)
+
+    return stereoRigObj
+
 def chessboardStereo(images, chessboardSize=DEFAULT_CHESSBOARD_SIZE, squareSize=1, distortionCoeffsNumber=5):
     """
     Performs stereo calibration between two cameras and returns a StereoRig object.
