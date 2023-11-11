@@ -14,10 +14,13 @@ loadPath = os.path.join(curPath,"res","1","calib")    # Image folder
 saveFile = os.path.join(curPath,"res","1","rig.json") # Destination
 
 # Total number of images
-N_IMAGES = 30
+N_IMAGES = 21
 
 # Image paths
-images = [ ( os.path.join(loadPath,str(i)+'_L.png'), os.path.join(loadPath,str(i)+'_R.png')) for i in range(N_IMAGES) ]
+# => Left World Cam + Right RGB Cam
+img_dir_L = "X:\\data\\chessboard_e\\extrinsics_sync\\left\\"
+img_dir_R = "X:\\data\\chessboard_e\\extrinsics_sync\\rgb\\"
+images = [(os.path.join(img_dir_L, f'left ({i+1}).jpg'), os.path.join(img_dir_R, f'rgb ({i+1}).jpg')) for i in range(N_IMAGES)]
 print(f"Calibrating using {len(images)} images from:\n{loadPath}...")
 
 # Calibrate and build StereoRig object

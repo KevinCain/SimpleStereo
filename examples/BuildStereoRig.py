@@ -37,8 +37,10 @@ images = [(os.path.join(img_dir_L, f'left ({i+1}).jpg'), os.path.join(img_dir_R,
 # Calibrate and build StereoRig object
 # Chessboard: (7,6) 52mm squares
 # Don't calibrate right camera in rig: we set distortion coefficients to zero
-rig = ss.calibration.chessboardHybridStereo(images, chessboardSize=(7,6), squareSize=52.0,
-distortionCoeffsNumber=0)
+#rig = ss.calibration.chessboardHybridStereo(images, chessboardSize=(7,6), squareSize=52.0, distortionCoeffsNumber=0)
+
+rig = ss.calibration.chessboardStereo( images, chessboardSize=(7,6), squareSize=52.0)
+
 
 # Save rig object to file
 rig.save(saveFile)
