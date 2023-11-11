@@ -10,11 +10,11 @@ Rectify a StereoRig previously created!
 
 # Paths
 curPath = os.path.dirname(os.path.realpath(__file__))
-loadFile = os.path.join(curPath,"res","1","rig.json")      # StereoRig file
-saveFile = os.path.join(curPath,"res","1","rigRect.json")  # Destination
+loadFile = os.path.join(curPath, "revok", "rig.json")
 
 # Load stereo rig from file
 rig = ss.StereoRig.fromFile(loadFile)
+saveFile = os.path.join(curPath, "revok", "rigRect.json")  # Destination
 
 # Choose a rectification algorithm and rectify the stereo rig
 # Resulting in a RectifiedStereoRig object
